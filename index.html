@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Simple Period Tracker with Moon Phases</title>
+<style>
+body { font-family: sans-serif; margin:0; background:#fff; display:flex; flex-direction:column; align-items:center; }
+#calendar { display:grid; grid-template-columns: repeat(7, 60px); gap:5px; margin-top:20px; }
+.day { width:60px; height:60px; border:1px solid #ccc; display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; position:relative; }
+.day.period { background:#fdd; }
+.day.moon::after { position:absolute; bottom:2px; font-size:12px; }
+#modal { display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:#fff; border:1px solid #333; padding:20px; z-index:10; }
+#modal select { margin-bottom:10px; width:100%; }
+#analysis { margin-top:20px; width:80%; }
+</style>
+</head>
+<body>
+
+<h1>Period Tracker</h1>
+<div id="calendar"></div>
+
+<div id="modal">
+  <h3>Track Day</h3>
+  <label>Period: <input type="checkbox" id="periodCheck"></label><br>
+  <label>Mood:
+    <select id="moodSelect">
+      <option value="">--</option>
+      <option value="Happy">Happy</option>
+      <option value="Irritable">Irritable</option>
+      <option value="Sad">Sad</option>
+      <option value="Anxious">Anxious</option>
+    </select>
+  </label><br>
+  <label>Symptoms:
+    <select id="symptomSelect" multiple size=4>
+      <option value="Cramps">Cramps</option>
+      <option value="Bloating">Bloating</option>
+      <option value="Headache">Headache</option>
+      <option value="Fatigue">Fatigue</option>
+    </select>
+  </label><br>
+  <button id="saveBtn">Save</button>
+  <button id="closeBtn">Close</button>
+</div>
+
+<div id="analysis">
+  <h2>Analysis</h2>
+  <div id="cycleLength"></div>
+  <div id="periodLength"></div>
+  <div id="symptomTrends"></div>
+</div>
+
+<script>
+// DATA
+let entries = {}; // key = YYYY-MM-DD
+
+const calendar = document.getElementById('calendar');
+let selectedDate = null;
+
+// UTILS
+function formatDate(d){ return d.toISOString().split('T')[0]; }
+
+// MOON PHASE CALCULATION (simple approximation)
+function getMoonPhase(date){
+  const c = new Date(date).getTime() / 86400000; // days since epoch
+  const phase = ((c + 4.867) % 29.53059) / 29.53059; // fraction of cycle
+  if(phase < 0.03 || phase > 0.97) return 'New'; 
+  if(phase < 0.22) return 'Waxing';
+  if(phase < 0.28) return 'First Quarter';
+  if(phase < 0.47) return 'Waxing Gibbous';
+  if(phase < 0.53) return 'Full';
+  if(phase < 0.72) return 'Waning Gibbous';
+  if(phase < 0.78) return 'Last Quarter';
+  return 'Waning';
+}
+
+// BUILD CALENDAR
+function buildCalendar(year, month){
+  calendar.innerHTML='';
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month+1, 0);
+  const startDay = firstDay.getDay();
+  for(let i=0;i<startDay;i++){
+    const empty = document.createElement('div');
+    calendar.appendChild(empty);
+  }
+  for(let d=1; d<=lastDay.getDate(); d++){
+    const date = new Date(year, month, d);
+    const div = document.createElement('div');
+    div.className='day';
+    div.dataset.date=formatDate(date);
+    div.innerHTML=`${d}<br><span class="moon">${getMoonPhase(date)}</span>`;
+    const key = formatDate(date);
+    if(entries[key] && entries[key].period) div.classList.add('period');
+    div.onclick = ()=>openModal(key);
+    calendar.appendChild(div);
+  }
+}
+
+// MODAL
+const modal = document.getElementById('modal');
+const periodCheck = document.getElementById('periodCheck');
+const moodSelect = document.getElementById('moodSelect');
+const symptomSelect = document.getElementById('symptomSelect');
+document.getElementById('saveBtn').onclick = ()=>{
+  entries[selectedDate] = {
+    period: periodCheck.checked,
+    mood: moodSelect.value,
+    symptoms: Array.from(symptomSelect.selectedOptions).map(o=>o.value)
+  };
+  modal.style.display='none';
+  buildCalendar(currentYear, currentMonth);
+  updateAnalysis();
+};
+document.getElementById('closeBtn').onclick = ()=>{ modal.style.display='none'; }
+
+function openModal(date){
+  selectedDate = date;
+  const entry = entries[date] || {period:false, mood:'', symptoms:[]};
+  periodCheck.checked = entry.period;
+  moodSelect.value = entry.mood;
+  Array.from(symptomSelect.options).forEach(o=>o.selected=entry.symptoms.includes(o.value));
+  modal.style.display='block';
+}
+
+// ANALYSIS
+function updateAnalysis(){
+  const keys = Object.keys(entries).sort();
+  // cycle length
+  const periodStarts = keys.filter(k=>entries[k].period).map(k=>new Date(k));
+  let cycles=[];
+  for(let i=1;i<periodStarts.length;i++){
+    cycles.push(Math.round((periodStarts[i]-periodStarts[i-1])/(1000*60*60*24)));
+  }
+  document.getElementById('cycleLength').innerText = cycles.length>0 ? `Average cycle length: ${Math.round(cycles.reduce((a,b)=>a+b,0)/cycles.length)} days` : 'Average cycle length: N/A';
+  // period length
+  let lengths=[];
+  for(let i=0;i<periodStarts.length;i++){
+    let start = periodStarts[i];
+    let count=1;
+    for(let j=1;j<keys.length;j++){
+      const next = new Date(keys[j]);
+      if(next>start && entries[keys[j]].period) count++;
+      else break;
+    }
+    lengths.push(count);
+  }
+  document.getElementById('periodLength').innerText = lengths.length>0 ? `Average period length: ${Math.round(lengths.reduce((a,b)=>a+b,0)/lengths.length)} days` : 'Average period length: N/A';
+  // symptom trends
+  const symptomCounts={};
+  for(let k of keys){
+    if(entries[k].symptoms) entries[k].symptoms.forEach(s=>{
+      symptomCounts[s] = (symptomCounts[s]||0)+1;
+    });
+  }
+  document.getElementById('symptomTrends').innerText = 'Symptom frequency: '+Object.entries(symptomCounts).map(([s,c])=>`${s}: ${c}`).join(', ');
+}
+
+// INIT
+const today = new Date();
+let currentYear = today.getFullYear();
+let currentMonth = today.getMonth();
+buildCalendar(currentYear, currentMonth);
+updateAnalysis();
+</script>
+</body>
+</html>
