@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Period Tracker with Moon History</title>
+<title>Period Tracker with Moon & Phases</title>
 <style>
 body { font-family:sans-serif; margin:0; background:#fff; display:flex; flex-direction:column; align-items:center; }
 #controls { margin-top:10px; }
@@ -11,9 +11,14 @@ button { margin:0 5px; }
 .day { width:60px; height:60px; border:1px solid #ccc; display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; position:relative; font-size:12px; }
 .day.period { background:#fdd; }
 .day.ovulation { background:#ffd; }
+.day.follicular { background:#eef; }
+.day.luteal { background:#efe; }
 .day span.moon { position:absolute; bottom:2px; font-size:14px; }
+.day span.intensity { position:absolute; top:2px; font-size:10px; }
 .weekdays { display:grid; grid-template-columns:repeat(7, 60px); gap:5px; margin-top:10px; font-weight:bold; text-align:center; }
 #modal { display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:#fff; border:1px solid #333; padding:20px; z-index:10; }
+#modal label { display:block; margin:5px 0; }
+#modal input[type=checkbox] { margin-right:5px; }
 #modal select { margin-bottom:10px; width:100%; }
 #analysis { margin-top:20px; width:80%; }
 </style>
@@ -36,7 +41,10 @@ button { margin:0 5px; }
 
 <div id="modal">
   <h3>Track Day</h3>
-  <label>Period: <input type="checkbox" id="periodCheck"></label><br>
+  <label><input type="checkbox" id="periodCheck"> Period</label>
+  <label><input type="checkbox" id="lightCheck"> Light</label>
+  <label><input type="checkbox" id="mediumCheck"> Medium</label>
+  <label><input type="checkbox" id="heavyCheck"> Heavy</label>
   <label>Mood:
     <select id="moodSelect">
       <option value="">--</option>
@@ -45,7 +53,7 @@ button { margin:0 5px; }
       <option value="Sad">Sad</option>
       <option value="Anxious">Anxious</option>
     </select>
-  </label><br>
+  </label>
   <label>Symptoms:
     <select id="symptomSelect" multiple size=4>
       <option value="Cramps">Cramps</option>
@@ -53,7 +61,7 @@ button { margin:0 5px; }
       <option value="Headache">Headache</option>
       <option value="Fatigue">Fatigue</option>
     </select>
-  </label><br>
+  </label>
   <button id="saveBtn">Save</button>
   <button id="closeBtn">Close</button>
 </div>
@@ -74,28 +82,19 @@ let selectedDate = null;
 
 // CURRENT VIEW
 let viewYear = 2026;
-let viewMonth = 0; // January 2026
+let viewMonth = 0;
 
-// WEEKDAY HEADERS already in HTML
-
-// MOON PHASES
-// Realigned moon calculation using reference full moon: Jan 6, 2026
-const referenceFullMoon = new Date("2026-01-06T00:00:00Z").getTime();
-const lunarCycle = 29.53058867; // days
-
+// MOON PHASES - Real Jan 2026
+const moonPhases = {
+  "2026-01-03":"🌕",
+  "2026-01-10":"🌗",
+  "2026-01-18":"🌑",
+  "2026-01-26":"🌓"
+};
 function moonIcon(date){
-  const d = new Date(date).getTime();
-  const diffDays = (d - referenceFullMoon) / (1000*60*60*24);
-  let phase = (diffDays / lunarCycle) % 1;
-  if(phase <0) phase +=1; // wrap negative
-  if(phase < 0.03 || phase >0.97) return '🌑';
-  if(phase < 0.22) return '🌒';
-  if(phase < 0.28) return '🌓';
-  if(phase < 0.47) return '🌔';
-  if(phase < 0.53) return '🌕';
-  if(phase < 0.72) return '🌖';
-  if(phase < 0.78) return '🌗';
-  return '🌘';
+  const key = date.toISOString().split('T')[0];
+  if(moonPhases[key]) return moonPhases[key];
+  return '';
 }
 
 // CALENDAR BUILD
@@ -105,20 +104,22 @@ function buildCalendar(){
   const firstDay = new Date(viewYear, viewMonth,1);
   const lastDay = new Date(viewYear, viewMonth+1,0);
   const startDay = firstDay.getDay();
-  // empty divs before first day
   for(let i=0;i<startDay;i++) calendar.appendChild(document.createElement('div'));
-  // days
   for(let d=1; d<=lastDay.getDate(); d++){
     const date = new Date(viewYear, viewMonth,d);
     const key = date.toISOString().split('T')[0];
     const div = document.createElement('div');
     div.className='day';
     div.dataset.date=key;
-    div.innerHTML = `<span>${d}</span><span class="moon">${moonIcon(date)}</span>`;
+    let intensity='';
     if(entries[key]){
       if(entries[key].period) div.classList.add('period');
-      else if(entries[key].phase==='ovulation') div.classList.add('ovulation');
+      if(entries[key].phase==='Ovulation') div.classList.add('ovulation');
+      if(entries[key].phase==='Follicular') div.classList.add('follicular');
+      if(entries[key].phase==='Luteal') div.classList.add('luteal');
+      if(entries[key].intensity) intensity = entries[key].intensity;
     }
+    div.innerHTML = `<span>${d}</span><span class="moon">${moonIcon(date)}</span><span class="intensity">${intensity}</span>`;
     div.onclick = ()=>openModal(key);
     calendar.appendChild(div);
   }
@@ -139,11 +140,20 @@ document.getElementById('nextMonth').onclick = ()=>{
 // MODAL
 const modal = document.getElementById('modal');
 const periodCheck = document.getElementById('periodCheck');
+const lightCheck = document.getElementById('lightCheck');
+const mediumCheck = document.getElementById('mediumCheck');
+const heavyCheck = document.getElementById('heavyCheck');
 const moodSelect = document.getElementById('moodSelect');
 const symptomSelect = document.getElementById('symptomSelect');
+
 document.getElementById('saveBtn').onclick = ()=>{
+  let intensity='';
+  if(lightCheck.checked) intensity='L';
+  else if(mediumCheck.checked) intensity='M';
+  else if(heavyCheck.checked) intensity='H';
   entries[selectedDate]={
     period: periodCheck.checked,
+    intensity:intensity,
     mood: moodSelect.value,
     symptoms: Array.from(symptomSelect.selectedOptions).map(o=>o.value)
   };
@@ -152,25 +162,31 @@ document.getElementById('saveBtn').onclick = ()=>{
   buildCalendar();
   updateAnalysis();
 };
+
 document.getElementById('closeBtn').onclick = ()=>{ modal.style.display='none'; }
 function openModal(date){
   selectedDate=date;
-  const entry = entries[date] || {period:false, mood:'', symptoms:[]};
-  periodCheck.checked = entry.period;
-  moodSelect.value = entry.mood;
+  const entry = entries[date] || {period:false,intensity:'', mood:'', symptoms:[]};
+  periodCheck.checked=entry.period;
+  lightCheck.checked=entry.intensity==='L';
+  mediumCheck.checked=entry.intensity==='M';
+  heavyCheck.checked=entry.intensity==='H';
+  moodSelect.value=entry.mood;
   Array.from(symptomSelect.options).forEach(o=>o.selected=entry.symptoms.includes(o.value));
   modal.style.display='block';
 }
 
 // ANALYSIS
 function updateAnalysis(){
-  const keys = Object.keys(entries).sort();
-  const periodStarts = keys.filter(k=>entries[k].period).map(k=>new Date(k));
+  const keys=Object.keys(entries).sort();
+  const periodStarts=keys.filter(k=>entries[k].period).map(k=>new Date(k));
   let cycles=[];
   for(let i=1;i<periodStarts.length;i++){
-    cycles.push(Math.round((periodStarts[i]-periodStarts[i-1])/(1000*60*60*24)));
+    const prevEnd = new Date(periodStarts[i-1].getTime());
+    prevEnd.setDate(prevEnd.getDate()+1); // day after last period
+    cycles.push(Math.round((periodStarts[i]-prevEnd)/(1000*60*60*24)));
   }
-  document.getElementById('cycleLength').innerText = cycles.length>0 ? `Average cycle length: ${Math.round(cycles.reduce((a,b)=>a+b,0)/cycles.length)} days` : 'Average cycle length: N/A';
+  document.getElementById('cycleLength').innerText = cycles.length>0?`Average cycle length: ${Math.round(cycles.reduce((a,b)=>a+b,0)/cycles.length)} days`:'Average cycle length: N/A';
   // period length
   let lengths=[];
   for(let i=0;i<periodStarts.length;i++){
@@ -182,7 +198,7 @@ function updateAnalysis(){
     }
     lengths.push(count);
   }
-  document.getElementById('periodLength').innerText = lengths.length>0 ? `Average period length: ${Math.round(lengths.reduce((a,b)=>a+b,0)/lengths.length)} days` : 'Average period length: N/A';
+  document.getElementById('periodLength').innerText = lengths.length>0?`Average period length: ${Math.round(lengths.reduce((a,b)=>a+b,0)/lengths.length)} days`:'Average period length: N/A';
   // symptoms
   const symptomCounts={};
   for(let k of keys){
@@ -190,9 +206,8 @@ function updateAnalysis(){
       symptomCounts[s]=(symptomCounts[s]||0)+1;
     });
   }
-  document.getElementById('symptomTrends').innerText = 'Symptom frequency: '+Object.entries(symptomCounts).map(([s,c])=>`${s}: ${c}`).join(', ');
-  const phases=['Menstrual','Follicular','Ovulation','Luteal'];
-  document.getElementById('phaseInfo').innerText = 'Phase info: '+phases.join(', ');
+  document.getElementById('symptomTrends').innerText='Symptom frequency: '+Object.entries(symptomCounts).map(([s,c])=>`${s}: ${c}`).join(', ');
+  document.getElementById('phaseInfo').innerText='Cycle phases: Follicular (~Day1–10), Ovulation (~Day11–14), Luteal (~Day15–28)';
 }
 
 // CYCLE PHASE ASSIGNMENT
@@ -203,10 +218,10 @@ function assignPhases(){
   const cycleLength = Math.round((periodStarts[1]-periodStarts[0])/(1000*60*60*24));
   for(let i=0;i<keys.length;i++){
     const d=new Date(keys[i]);
-    const daysSinceStart=Math.round((d-periodStarts[0])/(1000*60*60*24));
+    const daysSinceStart=Math.round((d-periodStarts[0])/(1000*60*60*24))+1;
     if(entries[keys[i]].period) entries[keys[i]].phase='Menstrual';
-    else if(daysSinceStart>=cycleLength*0.5-1 && daysSinceStart<=cycleLength*0.5+1) entries[keys[i]].phase='Ovulation';
-    else if(daysSinceStart<cycleLength*0.5) entries[keys[i]].phase='Follicular';
+    else if(daysSinceStart>=11 && daysSinceStart<=14) entries[keys[i]].phase='Ovulation';
+    else if(daysSinceStart<11) entries[keys[i]].phase='Follicular';
     else entries[keys[i]].phase='Luteal';
   }
 }
